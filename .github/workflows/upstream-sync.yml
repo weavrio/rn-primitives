@@ -1,0 +1,82 @@
+name: Upstream sync
+
+# Auto-PR on an upstream release. Deliberately opens a PR rather than pushing:
+# the repackage is a supply-chain control point, and a human reading the diff is
+# the point of it. The CI workflow gates the PR exactly as it gates any other.
+#
+# Publishing is a separate, manual step (release.yml) taken on a green PR merge —
+# never automatic, and never on a red gate.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays, 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/roninoss/rn-primitives.git || true
+
+      - name: Find the newest upstream release tag
+        id: upstream
+        run: |
+          git fetch upstream --tags
+          # Upstream tags each package release as `<pkg>@<version>`; the version
+          # this fork mirrors is the one on `all@*`.
+          TAG=$(git tag -l 'all@*' | sort -V | tail -1)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#all@}" >> "$GITHUB_OUTPUT"
+
+      - name: Stop if already on this release
+        id: check
+        run: |
+          CURRENT=$(node -p "require('./packages/rn-primitives/package.json').version")
+          if [ "$CURRENT" = "${{ steps.upstream.outputs.version }}" ]; then
+            echo "up-to-date=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge the upstream release
+        if: steps.check.outputs.up-to-date != 'true'
+        run: |
+          git config user.name  "weavr-bot"
+          git config user.email "noreply@weavr.io"
+          git merge --no-edit "${{ steps.upstream.outputs.tag }}"
+          node -e "
+            const fs = require('node:fs');
+            const path = 'packages/rn-primitives/package.json';
+            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+            pkg.version = '${{ steps.upstream.outputs.version }}';
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Open the review PR
+        if: steps.check.outputs.up-to-date != 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: upstream-sync/${{ steps.upstream.outputs.version }}
+          title: 'chore: sync upstream ${{ steps.upstream.outputs.tag }}'
+          body: |
+            Automated sync of upstream `${{ steps.upstream.outputs.tag }}`.
+
+            **This PR is the supply-chain review gate.** Before merging, read:
+
+            - the upstream source diff (behaviour changes reaching weavr);
+            - `packages/rn-primitives/package.json` — the regenerated `exports`
+              map and dependency set. A new public subpath or a new transitive
+              dependency appears here first.
+
+            CI gates this PR on the upstream build, the relocation contract
+            (including byte parity) and the consumer-surface typecheck. If the
+            pinned subpath list in `repackage.test.ts` no longer matches upstream,
+            the surface test fails **by design** — decide deliberately whether the
+            new primitive becomes public, then update the pinned list.
