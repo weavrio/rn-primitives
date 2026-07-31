@@ -33,33 +33,47 @@ jobs:
 
       # mise.toml is the single source of truth for the toolchain, but
       # actions/setup-node cannot read it (it supports .nvmrc, .node-version,
-      # .tool-versions and package.json only). Rather than duplicate the version
-      # into a second file that can drift, read it out here.
-      - name: Resolve the node version from mise.toml
+      # .tool-versions and package.json only), so both pins are read out here
+      # rather than duplicated into a second file that could drift.
+      - name: Resolve the toolchain from mise.toml and package.json
         id: toolchain
         run: |
-          node_version="$(grep -oP '(?<=^node = ")[^"]+' mise.toml)"
+          node_version="$(sed -nE 's/^node = "([^"]+)"/\1/p' mise.toml)"
+          pnpm_version="$(node -p "require('./package.json').packageManager.split('@')[1]")"
           [ -n "$node_version" ] || { echo "::error::no node pin in mise.toml"; exit 1; }
-          echo "node=$node_version" >> "$GITHUB_OUTPUT"
-
-      # pnpm MUST install before setup-node so `cache: pnpm` can resolve the
-      # store path. Reversing the order makes setup-node fall back to npm.
-      # The version comes from upstream's `packageManager` field, which is the
-      # same pin mise.toml carries.
-      # Pinned to v4, NOT the current v6: this repo is a fork, and GitHub applies
-      # its "selected actions" allowlist more strictly to forks. v6 is rejected at
-      # startup here ("not allowed in weavrio/rn-primitives") while the identical
-      # policy on weavrio/weavr permits it. Bumping this needs the repo's
-      # Settings > Actions allowlist widened to `pnpm/action-setup@*` first —
-      # a deliberate security decision, not a version bump.
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+          [ -n "$pnpm_version" ] || { echo "::error::no packageManager in package.json"; exit 1; }
+          echo "node=$node_version"  >> "$GITHUB_OUTPUT"
+          echo "pnpm=$pnpm_version"  >> "$GITHUB_OUTPUT"
+          echo "Resolved node $node_version, pnpm $pnpm_version"
 
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
           node-version: ${{ steps.toolchain.outputs.node }}
-          cache: pnpm
+
+      # pnpm is installed with npm rather than pnpm/action-setup: this repo is a
+      # fork, and GitHub rejects that action here at startup regardless of
+      # version ("not allowed in weavrio/rn-primitives") even though the bare
+      # `pnpm/action-setup` pattern is in the repo allowlist — a bare
+      # `owner/repo` pattern carries no `@version`/`@*` and so matches nothing.
+      # GitHub-owned actions are always allowed, so the rest of this workflow is
+      # unaffected. The version still comes from `packageManager`, so there is
+      # no new source of truth.
+      - name: Set up pnpm
+        run: npm install -g "pnpm@${{ steps.toolchain.outputs.pnpm }}"
+
+      # Cache the pnpm store by hand — actions/cache is GitHub-owned, so it is
+      # allowed where pnpm/action-setup's built-in caching is not.
+      - name: Resolve the pnpm store path
+        id: store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
 
       - name: Install dependencies
         # --ignore-scripts blocks dep lifecycle scripts (supply-chain hardening).
