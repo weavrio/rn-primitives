@@ -3,6 +3,14 @@
   "version": "1.5.2",
   "description": "Weavr repackaging of roninoss/rn-primitives — one package, per-primitive subpath exports. Version mirrors the upstream release it was built from.",
   "license": "MIT",
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weavrio/rn-primitives.git",
+    "directory": "packages/rn-primitives"
+  },
   "sideEffects": false,
   "files": [
     "dist",

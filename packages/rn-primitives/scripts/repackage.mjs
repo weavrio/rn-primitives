@@ -135,6 +135,12 @@ manifest.exports = {
   ...Object.fromEntries(names.map((name) => [`./${name}`, exportEntry(name)])),
 };
 manifest.dependencies = collectDependencies(names);
+// publishConfig/repository are hand-owned, not generated — assert rather than
+// rewrite, so a manifest that lost them fails the build instead of publishing
+// to the wrong access level.
+if (manifest.publishConfig?.access === undefined) {
+  throw new Error('repackage: package.json is missing publishConfig.access');
+}
 manifest.peerDependencies = { react: '*', 'react-native': '*', 'react-native-web': '*' };
 manifest.peerDependenciesMeta = {
   'react-native': { optional: true },
