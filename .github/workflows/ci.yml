@@ -31,29 +31,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # mise.toml is the single source of truth for the toolchain, but
+      # mise.toml is the single source of truth for the node pin, but
       # actions/setup-node cannot read it (it supports .nvmrc, .node-version,
-      # .tool-versions and package.json only). Rather than duplicate the version
-      # into a second file that can drift, read it out here.
+      # .tool-versions and package.json only), so it is read out here rather
+      # than duplicated into a second file that could drift.
       - name: Resolve the node version from mise.toml
         id: toolchain
         run: |
-          node_version="$(grep -oP '(?<=^node = ")[^"]+' mise.toml)"
+          node_version="$(sed -nE 's/^node = "([^"]+)"/\1/p' mise.toml)"
           [ -n "$node_version" ] || { echo "::error::no node pin in mise.toml"; exit 1; }
           echo "node=$node_version" >> "$GITHUB_OUTPUT"
 
       # pnpm MUST install before setup-node so `cache: pnpm` can resolve the
       # store path. Reversing the order makes setup-node fall back to npm.
-      # The version comes from upstream's `packageManager` field, which is the
-      # same pin mise.toml carries.
-      # Pinned to v4, NOT the current v6: this repo is a fork, and GitHub applies
-      # its "selected actions" allowlist more strictly to forks. v6 is rejected at
-      # startup here ("not allowed in weavrio/rn-primitives") while the identical
-      # policy on weavrio/weavr permits it. Bumping this needs the repo's
-      # Settings > Actions allowlist widened to `pnpm/action-setup@*` first —
-      # a deliberate security decision, not a version bump.
+      # The version comes from the root package.json `packageManager` field,
+      # which is the same pin mise.toml carries.
+      #
+      # Requires `pnpm/action-setup@*` in Settings > Actions > Allow specified
+      # actions. A bare `pnpm/action-setup` pattern — no `@version`, no `@*` —
+      # matches NOTHING and rejects every version at startup.
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Set up Node
         uses: actions/setup-node@v7
