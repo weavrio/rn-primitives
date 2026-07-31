@@ -1,0 +1,10 @@
+# Toolchain for the @weavr/rn-primitives repackage. Upstream declares
+# `engines.node >=20.11.0` and `packageManager: pnpm@9.1.4`; the repackage is
+# built and published from the same node the weavr monorepo uses so the emitted
+# artifacts are byte-reproducible across both.
+[tools]
+node = "24.17.0"
+# Matches upstream's own `packageManager` declaration — the fork must build with
+# the pnpm upstream builds with, or the lockfile could be rewritten and the
+# repackage would no longer be a faithful relocation.
+pnpm = "9.1.4"
