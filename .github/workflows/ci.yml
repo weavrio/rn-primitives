@@ -1,47 +1,80 @@
-name: CI
+name: ci
 
 # Gate for the @weavr/rn-primitives repackage. Upstream ships no test suite, so
-# the gate is: upstream builds clean -> the relocation contract holds -> the
-# consumer surface typechecks. All three must pass before a publish (release.yml
-# depends on this workflow).
+# the gate is: upstream builds clean -> the relocation contract holds (including
+# byte parity against upstream's own build) -> the consumer surface typechecks.
+# All three must pass before a publish.
 
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
   workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege: this workflow only reads source. No write or package scopes.
+permissions:
+  contents: read
+
+env:
+  CI: 'true'
 
 jobs:
   repackage:
+    name: build · relocation contract · consumer surface
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      # mise.toml is the single source of truth for the toolchain, but
+      # actions/setup-node cannot read it (it supports .nvmrc, .node-version,
+      # .tool-versions and package.json only). Rather than duplicate the version
+      # into a second file that can drift, read it out here.
+      - name: Resolve the node version from mise.toml
+        id: toolchain
+        run: |
+          node_version="$(grep -oP '(?<=^node = ")[^"]+' mise.toml)"
+          [ -n "$node_version" ] || { echo "::error::no node pin in mise.toml"; exit 1; }
+          echo "node=$node_version" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v4
+      # pnpm MUST install before setup-node so `cache: pnpm` can resolve the
+      # store path. Reversing the order makes setup-node fall back to npm.
+      # The version comes from upstream's `packageManager` field, which is the
+      # same pin mise.toml carries.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: ${{ steps.toolchain.outputs.node }}
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install dependencies
+        # --ignore-scripts blocks dep lifecycle scripts (supply-chain hardening).
+        # Load-bearing here: this repo exists to be a supply-chain control point,
+        # so its own CI must not execute arbitrary postinstall code.
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
-      # Leg 1 — upstream must build, then the repackage relocates its artifacts.
-      # Ordering is turbo's: @weavr/rn-primitives declares all 32 upstream
-      # packages as workspace devDependencies, so `^build` runs them first.
-      - name: Build (upstream, then repackage)
+      # Builds the 32 upstream packages, then the repackage. Ordering is turbo's:
+      # @weavr/rn-primitives declares them all as workspace devDependencies, so
+      # `^build` runs them first.
+      - name: Build
         run: pnpm build
 
-      # The repackage regenerates exports/dependencies into package.json. If that
-      # produces a diff, the committed manifest is stale and the audit surface
-      # would lie about what is public.
+      # The repackage regenerates exports/dependencies into package.json. A diff
+      # here means the committed manifest is stale, so the audit surface would
+      # misrepresent what actually ships.
       - name: Fail on an uncommitted manifest change
         run: git diff --exit-code packages/rn-primitives/package.json
 
-      # Leg 2 — the relocation contract, including byte parity against upstream.
       - name: Relocation contract
         run: pnpm --filter @weavr/rn-primitives test
 
-      # Leg 3 — the public subpath surface, resolved as a consumer would.
       - name: Consumer-surface typecheck
         run: pnpm --filter @weavr/rn-primitives typecheck
