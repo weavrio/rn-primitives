@@ -46,8 +46,14 @@ jobs:
       # store path. Reversing the order makes setup-node fall back to npm.
       # The version comes from upstream's `packageManager` field, which is the
       # same pin mise.toml carries.
+      # Pinned to v4, NOT the current v6: this repo is a fork, and GitHub applies
+      # its "selected actions" allowlist more strictly to forks. v6 is rejected at
+      # startup here ("not allowed in weavrio/rn-primitives") while the identical
+      # policy on weavrio/weavr permits it. Bumping this needs the repo's
+      # Settings > Actions allowlist widened to `pnpm/action-setup@*` first —
+      # a deliberate security decision, not a version bump.
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v4
 
       - name: Set up Node
         uses: actions/setup-node@v7
