@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "jsx": "preserve",
+    "strict": true,
+    "noEmit": true,
+    // The fixture resolves `@weavr/rn-primitives/<name>` through this package's
+    // own `exports` map (package self-reference), so a broken entry surfaces
+    // here as a real consumer would see it.
+    //
+    // skipLibCheck is ON deliberately: the repackaged output is entirely
+    // declaration files, and react-native's globals collide with `lib: DOM`
+    // (a known upstream conflict, not ours). Turning it off would drown this
+    // check in third-party noise while adding nothing — the resolvability of
+    // our own emitted specifiers is asserted directly by repackage.test.ts
+    // ("emits only relative specifiers that resolve to a real file").
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": ["consumer-surface.check.ts"]
+}

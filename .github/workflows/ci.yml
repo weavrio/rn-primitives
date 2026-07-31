@@ -1,0 +1,47 @@
+name: CI
+
+# Gate for the @weavr/rn-primitives repackage. Upstream ships no test suite, so
+# the gate is: upstream builds clean -> the relocation contract holds -> the
+# consumer surface typechecks. All three must pass before a publish (release.yml
+# depends on this workflow).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+jobs:
+  repackage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Leg 1 — upstream must build, then the repackage relocates its artifacts.
+      # Ordering is turbo's: @weavr/rn-primitives declares all 32 upstream
+      # packages as workspace devDependencies, so `^build` runs them first.
+      - name: Build (upstream, then repackage)
+        run: pnpm build
+
+      # The repackage regenerates exports/dependencies into package.json. If that
+      # produces a diff, the committed manifest is stale and the audit surface
+      # would lie about what is public.
+      - name: Fail on an uncommitted manifest change
+        run: git diff --exit-code packages/rn-primitives/package.json
+
+      # Leg 2 — the relocation contract, including byte parity against upstream.
+      - name: Relocation contract
+        run: pnpm --filter @weavr/rn-primitives test
+
+      # Leg 3 — the public subpath surface, resolved as a consumer would.
+      - name: Consumer-surface typecheck
+        run: pnpm --filter @weavr/rn-primitives typecheck
